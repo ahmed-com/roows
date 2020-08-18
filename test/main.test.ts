@@ -1,5 +1,6 @@
-const dummyFn = require('../src/main');
+require('mysql2/node_modules/iconv-lite').encodingExists('foo')
+const {
+    testDBSetup
+} = require('../src/main');
 
-test('dummyFn',()=>{
-    expect(dummyFn('ahmed ','Mamdouh')).toBe('ahmed Mamdouh');
-});
+test('testing data base set up',testDBSetup);
