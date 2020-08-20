@@ -159,7 +159,18 @@ class Queue{
         .then(data=>data.position);
     }
 
-    // public insertEvent(event:JSON,)
+    public insertEvent(event:JSON,position:number):Promise<number>{
+        const queue = this.queueName;
+        const query = "INSERT INTO events (data,position,publishedAt,queue) VALUES (:event , :position , :now , :queue);";
+
+        return Queue.pool.myExecute(query,{
+            queue,
+            event,
+            position,
+            now : moment(Date.now()).format(`YYYY-MM-DD HH:mm:ss`)
+        })
+        .then(({insertId})=>insertId);
+    }
 }
 
 
