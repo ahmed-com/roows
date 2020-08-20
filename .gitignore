@@ -3,3 +3,4 @@ notes.txt
 .env
 /test/sql manual tests/.env
 /test/sql manual tests/node_modules
+/dist

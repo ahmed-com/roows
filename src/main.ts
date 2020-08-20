@@ -1,10 +1,18 @@
 /*import dependencies*/
-const dotenv = require('dotenv');
+import dotenv from 'dotenv';
 const mysql = require('mysql2');
 const toUnnamed = require('named-placeholders')();
-const moment = require(`moment`);
+import moment from 'moment';
+import express,{Request,Response,NextFunction} from 'express';
+import {json} from 'body-parser';
 /*********************/
 
+
+
+/****import files****/
+import generalApiRouter from './routes/genera-api';
+import collectionApiRouter from './routes/collection-api';
+/*********************/
 
 
 /***run the service***/
@@ -181,7 +189,7 @@ class Queue{
             queue,
             collection,
             position
-        })
+        });
     }
 }
 
@@ -191,6 +199,15 @@ function main():void{
     dotenv.config();
     const pool:DBPool = setupDBConnectionPool(mysql);
     Collection.setDataBasePool(pool);
+    const app = express();
+
+    app.use(json());
+    app.use('/',generalApiRouter);
+    app.use(function errorHandler(err:Error,req:Request,res:Response,next:NextFunction):void{
+        res.status(500).json({message : err.message});
+    });
+
+    app.listen(4999);
 }
 
 
