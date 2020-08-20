@@ -98,10 +98,14 @@ class Collection {
         });
     }
 
-    // TO-DO
-    // public insertAccess(eventId:number,user:string):Promise<any>{
-    //     const query = `INSERT INTO ${this.eventUserTable} `
-    // }
+    public insertAccess(eventId:number,user:string):Promise<any>{
+        const query = "INSERT INTO accesses (user , event) VALUES (:user , :event);";
+
+        return Collection.pool.myExecute(query,{
+            user,
+            event : eventId
+        });
+    }
 
 }
 
@@ -154,6 +158,8 @@ class Queue{
         .then(result=>result[0])
         .then(data=>data.position);
     }
+
+    // public insertEvent(event:JSON,)
 }
 
 
