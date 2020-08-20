@@ -26,6 +26,7 @@ type event = {
     data : JSON;
     publishedAt : Date;
     position : number;
+    requestHook : string | null;
     id? : number
 }
 /*********************/
@@ -159,17 +160,28 @@ class Queue{
         .then(data=>data.position);
     }
 
-    public insertEvent(event:JSON,position:number):Promise<number>{
+    public insertEvent(event:event):Promise<number>{
         const queue = this.queueName;
-        const query = "INSERT INTO events (data,position,publishedAt,queue) VALUES (:event , :position , :now , :queue);";
+        const query = "INSERT INTO events (data,position,publishedAt,queue, requestHook) VALUES (:data , :position , :publishedAt ,:queue,:requestHook);";
 
         return Queue.pool.myExecute(query,{
             queue,
-            event,
-            position,
-            now : moment(Date.now()).format(`YYYY-MM-DD HH:mm:ss`)
+            ...event
         })
         .then(({insertId})=>insertId);
+    }
+
+    public getEventsAfterPosition(position:number, user:string):Promise<event[]>{
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "SELECT events.data AS data , events.publishedAt AS publishedAt , events.position AS position , events.requestHook AS requestHook , events.id AS id FROM events INNER JOIN accesses ON events.id = accesses.event INNER JOIN queues ON events.queue = queues.queue WHERE accesses.user = :user AND queues.queue = :queue AND queues.collection = :collection AND events.position > :position;";
+
+        return Queue.pool.myExecute(query,{
+            user,
+            queue,
+            collection,
+            position
+        })
     }
 }
 
