@@ -32,15 +32,8 @@ type event = {
 
 
 
-/**declare variables**/
-let servicePool : DBPool;
-let userPool : DBPool;
-/*********************/
-
-
-
 /***database setup***/
-function promisifyPool(pool: DBPool):void{
+function promisifyPool(pool: DBPool):DBPool{
     function execute(query : string , data : object):Promise<any>{
         const [unnamedQuery,dataArray] = toUnnamed(query,data);
         return new Promise<any>((resolve,reject)=>{
@@ -55,52 +48,47 @@ function promisifyPool(pool: DBPool):void{
     }
     
     pool.myExecute = execute;
+    return pool;
 }
 
-function setupServiceDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):void{
-    servicePool = mysql.createPool({
+function setupDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):DBPool{
+    const pool = mysql.createPool({
         host     : process.env.DBHOST,
         user     : process.env.DBUSER,
         password : process.env.DBPASSWORD,
         database : process.env.SERVICEDB
     });
 
-    promisifyPool(servicePool);
-}
-
-function setupUserDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):void{
-    userPool = mysql.createPool({
-        host     : process.env.DBHOST,
-        user     : process.env.DBUSER,
-        password : process.env.DBPASSWORD,
-        database : process.env.USERDB
-    });
-
-    promisifyPool(userPool);
+    return promisifyPool(pool);
 }
 /******************/
 
 
 
-class CollectionData{
+class Collection {
     public id:number;
-    private static pool:DBPool;
+    private static pool: DBPool;
 
-    constructor(id:number){
+    constructor(id:number) {
         this.id = id;
     }
 
     public getData():Promise<{authKey:string,userKey:string,expiration:number}>{
-        const getDataQuery = "SELECT authKey , userKey, expiration FROM collection WHERE id = :id LIMIT 1;";
+        const id = this.id;
+        const query = "SELECT authKey , userKey, expiration FROM collection WHERE id = :id LIMIT 1;";
 
-        return CollectionData.pool.myExecute(getDataQuery,{id : this.id})
-            .then(result=>result[0]);
+        return Collection.pool.myExecute(query,{id})
+            .then(result => result[0]);
     }
 
-    public static createCollection(id:string, authKey:string , userKey:string , expiration:number , hashedToken:string):Promise<any>{
-        const createCollectionQuery = "INSERT INTO collection(id,authKey,userKey,expiration,hashedToken, createdAt, updatedAt) VALUES (:id,:authKey,:userKey,:expiration,:hashedToken,:now, :now);";
+    public static setDataBasePool(pool:DBPool):void{
+        Collection.pool = pool;
+    }
 
-        return CollectionData.pool.myExecute(createCollectionQuery,{
+    public static createCollection(id:string , authKey:string , userKey:string , expiration:number , hashedToken:string):Promise<any>{
+        const query = "INSERT INTO collection(id,authKey,userKey,expiration,hashedToken, createdAt, updatedAt) VALUES (:id,:authKey,:userKey,:expiration,:hashedToken,:now, :now);";
+
+        return Collection.pool.myExecute(query,{
             id,
             authKey,
             userKey,
@@ -110,87 +98,61 @@ class CollectionData{
         });
     }
 
-    public static setDataBasePool(pool:DBPool):void{
-        CollectionData.pool = pool;
-    }
-}
-
-
-
-class Collection {
-    public id:number;
-    private collectionData:CollectionData;
-    private static pool: DBPool;
-    private eventTable = `t${this.id}event`;
-    private eventUserTable = `t${this.id}eventUser`;
-    private queueTable = `t${this.id}queue`;
-
-    constructor(id:number) {
-        this.id = id;
-        this.collectionData = new CollectionData(id);
-    }
-
-    public getData():Promise<{authKey:string,userKey:string,expiration:number}>{
-        return this.collectionData.getData();
-    }
-
-    public static setDataBasePool(pool:DBPool):void{
-        Collection.pool = pool;
-    }
-
-    public static createCollection(id:string , authKey:string , userKey:string , expiration:number , hashedToken:string):Promise<any>{
-        const eventTable = `t${id}event`;
-        const eventUserTable = `t${id}eventUser`;
-        const queueTable = `t${id}queue`;
-
-        // TO-DO : insert more indexes
-        const createEventTableQuery = `CREATE TABLE IF NOT EXISTS ${eventTable} (id INTEGER NOT NULL auto_increment UNIQUE ,data JSON NOT NULL, position INTEGER NOT NULL, publishedAt DATETIME NOT NULL, queue VARCHAR(255) NOT NULL ,PRIMARY KEY (id),FOREIGN KEY (queue) REFERENCES ${queueTable}(queue) ON DELETE CASCADE ON UPDATE CASCADE) ENGINE=InnoDB;`;
-        const createEventUserTableQuery = `CREATE TABLE IF NOT EXISTS ${eventUserTable} (user VARCHAR(255) NOT NULL,event INTEGER NOT NULL,PRIMARY KEY (user,event) FOREIGN KEY (event) REFERENCES ${eventTable}(id) ON DELETE CASCADE ON UPDATE CASCADE) ENGINE=InnoDB;`;
-        const createQueueTableQuery = `CREATE TABLE IF NOT EXISTS ${queueTable} (queue VARCHAR(255) NOT NULL UNIQUE,position INTEGER NOT NULL,PRIMARY KEY (queue))ENGINE=InnoDB;`;
-
-        return CollectionData.createCollection(id,authKey,userKey,expiration,hashedToken)
-            .then(()=>Collection.pool.myExecute(createQueueTableQuery,{}))
-            .then(()=>Collection.pool.myExecute(createEventTableQuery,{}))
-            .then(()=> Collection.pool.myExecute(createEventUserTableQuery,{}));
-    }
-
     // TO-DO
     // public insertAccess(eventId:number,user:string):Promise<any>{
     //     const query = `INSERT INTO ${this.eventUserTable} `
     // }
 
-    public Queue(){
-        const collection = this;
+}
 
-        return class{
-            public queueName:string;
-        
-            constructor(queueName:string){
-                this.queueName = queueName;
-            }
-        
-            public exists():Promise<boolean>{
-                const queue = this.queueName;
-                const query = `SELECT EXISTS( SELECT queue FROM ${collection.queueTable} WHERE queue = :queue LIMIT 1 ) AS exists;`;
-                return Collection.pool.myExecute(query,{queue})
-                    .then(result => result[0])
-                    .then(data => data.exists);
-            }
 
-            public incrementPosition():Promise<any>{
-                const queue = this.queueName;
-                const query = `INSERT INTO ${collection.queueTable} (queue , position) VALUES (:queue,1) ON DUPLICATE KEY UPDATE position = position + 1;`;
-                return Collection.pool.myExecute(query,{queue});
-            }
 
-            public getPosition():Promise<number>{
-                const queue = this.queueName;
-                const query = `SELECT position FROM ${collection.queueTable} WHERE queue = :queue LIMIT 1;`;
-                return Collection.pool.myExecute(query,{queue})
-                    .then(result=>result[0])
-                    .then(data=>data.position);
-            }
-        }
+class Queue{
+    public collection:Collection;
+    public queueName:string;
+    private static pool: DBPool;
+
+    constructor(queueName:string , collection:Collection){
+        this.queueName = queueName;
+        this.collection = collection;
+    }
+
+    public static setDataBasePool(pool:DBPool):void{
+        Queue.pool = pool;
+    }
+
+    public exists():Promise<boolean>{
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "SELECT EXISTS( SELECT queue FROM queues WHERE queue = :queue AND collection = :collection LIMIT 1 ) AS exists;";
+        return Queue.pool.myExecute(query,{
+            queue,
+            collection
+        })
+        .then(result => result[0])
+        .then(data => data.exists);
+    }
+
+    public incrementPosition():Promise<any>{
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "INSERT INTO queues (queue , position, collection) VALUES (:queue,1,:collection) ON DUPLICATE KEY UPDATE position = position + 1;";
+        return Queue.pool.myExecute(query,{
+            queue,
+            collection
+        });
+    }
+
+    public getPosition():Promise<number>{
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "SELECT position FROM queues WHERE queue = :queue AND collection = :collection LIMIT 1;";
+        return Queue.pool.myExecute(query,{
+            queue,
+            collection
+        })
+        .then(result=>result[0])
+        .then(data=>data.position);
     }
 }
 
@@ -198,10 +160,8 @@ class Collection {
 
 function main():void{
     dotenv.config();
-    setupServiceDBConnectionPool(mysql);
-    setupUserDBConnectionPool(mysql);
-    CollectionData.setDataBasePool(servicePool);
-    Collection.setDataBasePool(userPool);
+    const pool:DBPool = setupDBConnectionPool(mysql);
+    Collection.setDataBasePool(pool);
 }
 
 
@@ -213,16 +173,15 @@ function runGarbageCollectors():void{
 
 
 /**testing setup**/
-const testDataBaseSetup = function():void{
-    testSetup(userPool);
-    testSetup(servicePool);
+// const testDataBaseSetup = function():void{
+//     testSetup(pool);
 
-    function testSetup(pool:DBPool):void{
-        const query = `INSERT INTO tabletest(fieldtest) VALUES (:value);`;
-        pool.myExecute(query,{value : 1})
-    }
-}
+//     function testSetup(pool:DBPool):void{
+//         const query = `INSERT INTO tabletest(fieldtest) VALUES (:value);`;
+//         pool.myExecute(query,{value : 1})
+//     }
+// }
 /*****************/
-module.exports = {
-    testDBSetup : testDataBaseSetup
-}
+// module.exports = {
+//     testDBSetup : testDataBaseSetup
+// }
