@@ -84,7 +84,7 @@ class Collection {
 
     public getData():Promise<{authKey:string,userKey:string,expiration:number}>{
         const id = this.id;
-        const query = "SELECT authKey , userKey, expiration FROM collection WHERE id = :id LIMIT 1;";
+        const query = "SELECT authKey , userKey, expiration FROM collections WHERE id = :id LIMIT 1;";
 
         return Collection.pool.myExecute(query,{id})
             .then(result => result[0]);
@@ -95,7 +95,7 @@ class Collection {
     }
 
     public static createCollection(id:string , authKey:string , userKey:string , expiration:number , hashedToken:string):Promise<any>{
-        const query = "INSERT INTO collection(id,authKey,userKey,expiration,hashedToken, createdAt, updatedAt) VALUES (:id,:authKey,:userKey,:expiration,:hashedToken,:now, :now);";
+        const query = "INSERT INTO collections(id,authKey,userKey,expiration,hashedToken, createdAt, updatedAt) VALUES (:id,:authKey,:userKey,:expiration,:hashedToken,:now, :now);";
 
         return Collection.pool.myExecute(query,{
             id,
@@ -143,13 +143,13 @@ class Queue{
             collection
         })
         .then(result => result[0])
-        .then(data => data.exists);
+        .then(data => data.bool);
     }
 
     public incrementPosition():Promise<any>{
         const queue = this.queueName;
         const collection = this.collection.id;
-        const query = "INSERT INTO queues (queue , position, collection) VALUES (:queue,1,:collection) ON DUPLICATE KEY UPDATE position = position + 1;";
+        const query = "INSERT INTO queues (queue , lastPosition, collection) VALUES (:queue,1,:collection) ON DUPLICATE KEY UPDATE lastPosition = lastPosition + 1;";
         return Queue.pool.myExecute(query,{
             queue,
             collection
@@ -159,13 +159,13 @@ class Queue{
     public getPosition():Promise<number>{
         const queue = this.queueName;
         const collection = this.collection.id;
-        const query = "SELECT position FROM queues WHERE queue = :queue AND collection = :collection LIMIT 1;";
+        const query = "SELECT lastPosition FROM queues WHERE queue = :queue AND collection = :collection LIMIT 1;";
         return Queue.pool.myExecute(query,{
             queue,
             collection
         })
         .then(result=>result[0])
-        .then(data=>data.position);
+        .then(data=>data.lastPosition);
     }
 
     public insertEvent(event:event):Promise<number>{
