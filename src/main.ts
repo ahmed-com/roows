@@ -10,7 +10,7 @@ import {json} from 'body-parser';
 
 
 /****import files****/
-import generalApiRouter from './routes/genera-api';
+import generalApiRouter from './routes/general-api';
 import collectionApiRouter from './routes/collection-api';
 /*********************/
 

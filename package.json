@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/express": "^4.17.7",
     "@types/jest": "^26.0.10",
     "@types/node": "^14.6.0",
     "jest": "^26.4.0",
@@ -18,12 +19,15 @@
     "typescript": "^3.9.7"
   },
   "dependencies": {
-    "@types/express": "^4.17.7",
+    "bcryptjs": "^2.4.3",
     "body-parser": "^1.19.0",
     "dotenv": "^8.2.0",
     "express": "^4.17.1",
+    "express-validator": "^6.6.1",
+    "jsonwebtoken": "^8.5.1",
     "moment": "^2.27.0",
     "mysql2": "^2.1.0",
-    "named-placeholders": "^1.1.2"
+    "named-placeholders": "^1.1.2",
+    "ws": "^7.3.1"
   }
 }
