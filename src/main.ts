@@ -1,8 +1,9 @@
 /*import dependencies*/
 import dotenv from 'dotenv';
+import ws from 'ws';
 const mysql = require('mysql2');
 const toUnnamed = require('named-placeholders')();
-import moment from 'moment';
+import moment, { fn } from 'moment';
 import express,{Request,Response,NextFunction} from 'express';
 import {json} from 'body-parser';
 /*********************/
@@ -12,12 +13,8 @@ import {json} from 'body-parser';
 /****import files****/
 import generalApiRouter from './routes/general-api';
 import collectionApiRouter from './routes/collection-api';
-/*********************/
-
-
-/***run the service***/
-main();
-runGarbageCollectors();
+import { Socket } from 'dgram';
+import { IncomingMessage } from 'http';
 /*********************/
 
 
@@ -37,6 +34,17 @@ type event = {
     requestHook : string | null;
     id? : number
 }
+/*********************/
+
+
+
+/**declare variables**/
+let DBHost:string;
+let DBUser:string;
+let DBPassword:string;
+let serviceDB:string;
+let httpPort:number;
+let wsPort:number;
 /*********************/
 
 
@@ -62,10 +70,10 @@ function promisifyPool(pool: DBPool):DBPool{
 
 function setupDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):DBPool{
     const pool = mysql.createPool({
-        host     : process.env.DBHOST,
-        user     : process.env.DBUSER,
-        password : process.env.DBPASSWORD,
-        database : process.env.SERVICEDB
+        host     : DBHost,
+        user     : DBUser,
+        password : DBPassword,
+        database : serviceDB
     });
 
     return promisifyPool(pool);
@@ -193,12 +201,33 @@ class Queue{
     }
 }
 
+function importConstants():void{
+    DBHost = process.env.DBHOST || 'localhost';
+    DBUser = process.env.DBUSER || 'root';
+    DBPassword = process.env.DBPASSWORD || '';
+    serviceDB = process.env.SERVICEDB || 'roows';
+    httpPort = parseInt(process.env.HTTPPORT || '5000');
+    wsPort = parseInt(process.env.WSPORT || '4999');
+}
+
+
+
+function handleConnction(socket:ws,request:IncomingMessage):void{
+    // TO-DO :
+    // get the collection ID from request.headers.host
+    // get the client token from request.headers['sec-websocket-protocol']
+    // if authentication is successful : store the socket in that collection "in memory of course"
+}
+
 
 
 function main():void{
     dotenv.config();
+    importConstants();
+
     const pool:DBPool = setupDBConnectionPool(mysql);
     Collection.setDataBasePool(pool);
+
     const app = express();
 
     app.use(json());
@@ -207,7 +236,11 @@ function main():void{
         res.status(500).json({message : err.message});
     });
 
-    app.listen(4999);
+
+    app.listen(httpPort);
+
+    const webSocketServer = new ws.Server({port : wsPort});
+    webSocketServer.on('connection',handleConnction);
 }
 
 
@@ -215,6 +248,16 @@ function main():void{
 function runGarbageCollectors():void{
 
 }
+
+
+
+
+/***run the service***/
+main();
+runGarbageCollectors();
+/*********************/
+
+
 
 
 
