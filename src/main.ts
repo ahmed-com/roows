@@ -21,10 +21,16 @@ import { IncomingMessage } from 'http';
 
 /****declare types****/
 type mysqlCallback = (err:any , rows:Object[])=>void;
+
 type basic = string|number|boolean|Date;
+
 interface DBPool{
     execute : (query:string, data : basic[], callback:mysqlCallback)=> void;
     myExecute : (query:string, data : object)=> Promise<any>;
+}
+
+interface connections{
+    [user:string] : [Socket]
 }
 
 type event = {
@@ -84,10 +90,20 @@ function setupDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):DBPoo
 
 class Collection {
     public id:number;
+    private connections:connections;
     private static pool: DBPool;
 
     constructor(id:number) {
         this.id = id;
+        this.connections = {};
+    }
+
+    public addConnection(user:string,socket:Socket):void{
+        // TO-DO
+    }
+
+    public removeConnection(user:string,socket:Socket):void{
+        // TO-DO
     }
 
     public getData():Promise<{authKey:string,userKey:string,expiration:number}>{
@@ -117,6 +133,15 @@ class Collection {
 
     public insertAccess(eventId:number,user:string):Promise<any>{
         const query = "INSERT INTO accesses (user , event) VALUES (:user , :event);";
+
+        return Collection.pool.myExecute(query,{
+            user,
+            event : eventId
+        });
+    }
+
+    public insertDeliverdAccess(eventId:number,user:string):Promise<any>{
+        const query = "INSERT INTO accesses (user , event,deliverd) VALUES (:user , :event,1);";
 
         return Collection.pool.myExecute(query,{
             user,
@@ -199,6 +224,18 @@ class Queue{
             position
         });
     }
+
+    public getListeners():Promise<string[]>{
+        // TO-DO
+    }
+
+    public addListener(user:string):Promise<any>{
+        // TO-DO
+    }
+
+    public removeListener(user:string):Promise<any>{
+        // TO-DO
+    }
 }
 
 function importConstants():void{
@@ -216,7 +253,9 @@ function handleConnction(socket:ws,request:IncomingMessage):void{
     // TO-DO :
     // get the collection ID from request.headers.host
     // get the client token from request.headers['sec-websocket-protocol']
-    // if authentication is successful : store the socket in that collection "in memory of course"
+    // if authentication is successful : store the socket in that collection connections
+    
+    // socket.on('close', TO-DO );
 }
 
 
