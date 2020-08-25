@@ -99,12 +99,15 @@ class Collection {
         this.connections = {};
     }
 
-    public addConnection(user:string,socket:ws):void{
-        // TO-DO
+    public addConnection(user:string,socket:ws):number{
+        const userSockets:ws[] = this.connections[user];
+        const socketIndex:number =  userSockets.push(socket) -1;
+        return socketIndex;
     }
 
-    public removeConnection(user:string,socket:ws):void{
-        // TO-DO
+    public removeConnection(user:string,index:number):void{
+        const userSockets:ws[] = this.connections[user];
+        userSockets.splice(index,1);
     }
 
     public getData():Promise<{authKey:string,userKey:string,expiration:number}>{
@@ -301,8 +304,10 @@ async function handleConnction(socket:ws,request:IncomingMessage){
         socket.close(401,JSON.stringify({error : 'NOT AUTHENTICATED'}));
         return;
     }
-    collection.addConnection(user,socket);
-    // socket.on('close', TO-DO );
+    const socketIndex = collection.addConnection(user,socket);
+    socket.on('close',function handleDisconnction(){
+        collection.removeConnection(user,socketIndex);
+    });
 }
 
 
