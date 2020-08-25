@@ -30,7 +30,7 @@ interface DBPool{
 }
 
 interface connections{
-    [user:string] : [Socket]
+    [user:string] : [ws]
 }
 
 type event = {
@@ -51,6 +51,7 @@ let DBPassword:string;
 let serviceDB:string;
 let httpPort:number;
 let wsPort:number;
+let hostName:string;
 /*********************/
 
 
@@ -98,11 +99,11 @@ class Collection {
         this.connections = {};
     }
 
-    public addConnection(user:string,socket:Socket):void{
+    public addConnection(user:string,socket:ws):void{
         // TO-DO
     }
 
-    public removeConnection(user:string,socket:Socket):void{
+    public removeConnection(user:string,socket:ws):void{
         // TO-DO
     }
 
@@ -243,18 +244,64 @@ function importConstants():void{
     DBUser = process.env.DBUSER || 'root';
     DBPassword = process.env.DBPASSWORD || '';
     serviceDB = process.env.SERVICEDB || 'roows';
+    hostName = process.env.HOSTNAME || 'localhost';
     httpPort = parseInt(process.env.HTTPPORT || '5000');
     wsPort = parseInt(process.env.WSPORT || '4999');
 }
 
 
 
-function handleConnction(socket:ws,request:IncomingMessage):void{
-    // TO-DO :
-    // get the collection ID from request.headers.host
-    // get the client token from request.headers['sec-websocket-protocol']
-    // if authentication is successful : store the socket in that collection connections
-    
+function extractIdAndToken(request:IncomingMessage):[number,string]{
+    let id:number;
+    let token:string;
+    const url = request.url || '/';
+    const stringId = url.split('/')[1];
+    id = parseInt(stringId);
+    const tokenOrTokens = request.headers['sec-websocket-protocol'] || '';
+    if(Array.isArray(tokenOrTokens)){
+        token = tokenOrTokens[0];
+    }else{
+        token = tokenOrTokens;
+    }
+    return [id,token];
+}
+
+
+
+class Authenticator{
+    public collection:Collection;
+    private authKey?:string;
+
+    constructor(collection:Collection){
+        this.collection = collection;
+    }
+
+    public async validateCollection():boolean{
+        // TO-DO
+    }
+
+    public async validateToken(token:string):[boolean,string]{
+        // TO-DO
+    }
+}
+
+
+
+async function handleConnction(socket:ws,request:IncomingMessage){
+    const [collectionId,token] = extractIdAndToken(request);
+    const collection = new Collection(collectionId);
+    const authenticator = new Authenticator(collection);
+    const isValidCollection = await authenticator.validateCollection()
+    if(!isValidCollection) {
+        socket.close(422,JSON.stringify({error : 'UNKNOWN COLLECTION'}));
+        return;
+    }
+    const [tokenIsValid , user] = await authenticator.validateToken(token);
+    if(!tokenIsValid) {
+        socket.close(401,JSON.stringify({error : 'NOT AUTHENTICATED'}));
+        return;
+    }
+    collection.addConnection(user,socket);
     // socket.on('close', TO-DO );
 }
 
