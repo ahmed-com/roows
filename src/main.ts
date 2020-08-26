@@ -1,6 +1,7 @@
 /*import dependencies*/
 import dotenv from 'dotenv';
 import ws from 'ws';
+import jwt from 'jsonwebtoken';
 const mysql = require('mysql2');
 const toUnnamed = require('named-placeholders')();
 import moment, { fn } from 'moment';
@@ -31,6 +32,10 @@ interface DBPool{
 
 interface connections{
     [user:string] : [ws]
+}
+
+interface decodedToken{
+    [userKey:string] : string
 }
 
 type event = {
@@ -110,12 +115,15 @@ class Collection {
         userSockets.splice(index,1);
     }
 
-    public getData():Promise<{authKey:string,userKey:string,expiration:number}>{
+    public getData():Promise<({authKey:string,userKey:string,expiration:number} | false)>{
         const id = this.id;
         const query = "SELECT authKey , userKey, expiration FROM collections WHERE id = :id LIMIT 1;";
 
         return Collection.pool.myExecute(query,{id})
-            .then(result => result[0]);
+            .then(function handleResult(result):({authKey:string,userKey:string,expiration:number} | false){
+                if (!result[0]) return false;
+                return result[0];
+            });
     }
 
     public static setDataBasePool(pool:DBPool):void{
@@ -207,10 +215,12 @@ class Queue{
 
     public insertEvent(event:event):Promise<number>{
         const queue = this.queueName;
-        const query = "INSERT INTO events (data,position,publishedAt,queue, requestHook) VALUES (:data , :position , :publishedAt ,:queue,:requestHook);";
+        const collection = this.collection.id;
+        const query = "INSERT INTO events (data,position,publishedAt,queue,collection, requestHook) VALUES (:data , :position , :publishedAt ,:queue,:collection, :requestHook);";
 
         return Queue.pool.myExecute(query,{
             queue,
+            collection,
             ...event
         })
         .then(({insertId})=>insertId);
@@ -219,7 +229,7 @@ class Queue{
     public getEventsAfterPosition(position:number, user:string):Promise<event[]>{
         const queue = this.queueName;
         const collection = this.collection.id;
-        const query = "SELECT events.data AS data , events.publishedAt AS publishedAt , events.position AS position , events.requestHook AS requestHook , events.id AS id FROM events INNER JOIN accesses ON events.id = accesses.event INNER JOIN queues ON events.queue = queues.queue WHERE accesses.user = :user AND queues.queue = :queue AND queues.collection = :collection AND events.position > :position;";
+        const query = "SELECT events.data AS data , events.publishedAt AS publishedAt , events.position AS position , events.requestHook AS requestHook , events.id AS id FROM events INNER JOIN accesses ON events.id = accesses.event WHERE accesses.user = :user AND events.queue = :queue AND events.collection = :collection AND events.position > :position;";
 
         return Queue.pool.myExecute(query,{
             user,
@@ -229,16 +239,39 @@ class Queue{
         });
     }
 
-    public getListeners():Promise<string[]>{
-        // TO-DO
+    public getListeners():Promise<[{user:string}]>{
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "SELECT user FROM listeners WHERE collection = :collection AND queue = :queue;";
+
+        return Queue.pool.myExecute(query,{
+            queue,
+            collection
+        });
     }
 
     public addListener(user:string):Promise<any>{
-        // TO-DO
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "INSERT INTO listeners (user , queue,collection) VALUES (:user,:queue,:collection);";
+
+        return Queue.pool.myExecute(query,{
+            user,
+            queue,
+            collection
+        })
     }
 
     public removeListener(user:string):Promise<any>{
-        // TO-DO
+        const queue = this.queueName;
+        const collection = this.collection.id;
+        const query = "DELETE FROM listeners WHERE queue = :queue AND user = :user AND collection = :collection";
+
+        return Queue.pool.myExecute(query,{
+            queue,
+            user,
+            collection
+        })
     }
 }
 
@@ -273,18 +306,60 @@ function extractIdAndToken(request:IncomingMessage):[number,string]{
 
 class Authenticator{
     public collection:Collection;
-    private authKey?:string;
+    private hasTheData:boolean;
+    private authKey:string;
+    private userKey:string;
 
     constructor(collection:Collection){
         this.collection = collection;
+        this.authKey = '';
+        this.userKey = 'userId';
+        this.hasTheData = false;
     }
 
-    public async validateCollection():boolean{
-        // TO-DO
+    public async validateCollection():Promise<boolean>{
+        const authenticator = this;
+        return this.collection.getData()
+            .then(function handleData(data):boolean{
+                if(!data) return false;
+                authenticator.hasTheData = true;
+                authenticator.authKey = data.authKey;
+                authenticator.userKey = data.userKey;
+                return true;
+            })
     }
 
-    public async validateToken(token:string):[boolean,string]{
-        // TO-DO
+    private async decodeToken(token:string):Promise<[boolean,string]>{
+        const publicKey = this.authKey;
+        const userKey = this.userKey;
+        try{
+            const decoded = <decodedToken> jwt.verify(token,publicKey);
+            let decodedObj:decodedToken;
+            if(typeof decoded ==='string'){
+                decodedObj = JSON.parse(decoded);
+            }else{
+                decodedObj = decoded;
+            }
+            const user:string = decodedObj[userKey];
+            return [true , user];
+        }catch(err){
+            return [false,''];
+        }
+    }
+
+    public async validateToken(token:string):Promise<[boolean,string]>{
+        const authenticator = this;
+        if(this.hasTheData){
+            return this.decodeToken(token);
+        }else{
+            return this.collection.getData()
+                .then(function handleData(data){
+                    if(data === false) throw new Error();
+                    authenticator.authKey = data.authKey;
+                    authenticator.userKey = data.userKey;
+                    return authenticator.decodeToken(token);
+                })
+        }
     }
 }
 
