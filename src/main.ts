@@ -16,6 +16,7 @@ import generalApiRouter from './routes/general-api';
 import collectionApiRouter from './routes/collection-api';
 import { Socket } from 'dgram';
 import { IncomingMessage } from 'http';
+import { type } from 'os';
 /*********************/
 
 
@@ -38,12 +39,41 @@ interface decodedToken{
     [userKey:string] : string
 }
 
+interface IRoom{
+    getListeners : ()=>Promise<[{user:string}]>
+}
+
+interface IConnectionsStore{
+    getSockets : (user:string)=> [ws]
+}
+
+interface IEventPublisher{
+    publishEvent : (event:event)=>Promise<any>
+}
+
+interface IEventStore{
+    storeEvent : (event:unpositionedEvent)=>Promise<{id:number,position:number}>
+}
+
+type unpositionedEvent = {
+    data : JSON;
+    publishedAt : Date;
+    requestHook : string | null;
+}
+
+type rawEvent = {
+    data : JSON;
+    publishedAt : Date;
+    position : number;
+    requestHook : string | null;
+}
+
 type event = {
     data : JSON;
     publishedAt : Date;
     position : number;
     requestHook : string | null;
-    id? : number
+    id : number
 }
 /*********************/
 
@@ -94,7 +124,7 @@ function setupDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):DBPoo
 
 
 
-class Collection {
+class Collection implements IConnectionsStore {
     public id:number;
     private connections:connections;
     private static pool: DBPool;
@@ -106,13 +136,17 @@ class Collection {
 
     public addConnection(user:string,socket:ws):number{
         const userSockets:ws[] = this.connections[user];
-        const socketIndex:number =  userSockets.push(socket) -1;
+        const socketIndex:number =  userSockets.push(socket) - 1;
         return socketIndex;
     }
 
     public removeConnection(user:string,index:number):void{
         const userSockets:ws[] = this.connections[user];
         userSockets.splice(index,1);
+    }
+
+    public getSockets(user:string):[ws]{
+        return this.connections[user];
     }
 
     public getData():Promise<({authKey:string,userKey:string,expiration:number} | false)>{
@@ -161,11 +195,16 @@ class Collection {
         });
     }
 
+    public getQueue(queueName:string):Queue{
+        const collection = this;
+        return new Queue(queueName,collection);
+    }
+
 }
 
 
 
-class Queue{
+class Queue implements IRoom{
     public collection:Collection;
     public queueName:string;
     private static pool: DBPool;
@@ -201,7 +240,7 @@ class Queue{
         });
     }
 
-    public getPosition():Promise<number>{
+    public getLastPosition():Promise<number>{
         const queue = this.queueName;
         const collection = this.collection.id;
         const query = "SELECT lastPosition FROM queues WHERE queue = :queue AND collection = :collection LIMIT 1;";
@@ -213,7 +252,7 @@ class Queue{
         .then(data=>data.lastPosition);
     }
 
-    public insertEvent(event:event):Promise<number>{
+    public insertEvent(event:rawEvent):Promise<number>{
         const queue = this.queueName;
         const collection = this.collection.id;
         const query = "INSERT INTO events (data,position,publishedAt,queue,collection, requestHook) VALUES (:data , :position , :publishedAt ,:queue,:collection, :requestHook);";
@@ -275,31 +314,48 @@ class Queue{
     }
 }
 
-function importConstants():void{
-    DBHost = process.env.DBHOST || 'localhost';
-    DBUser = process.env.DBUSER || 'root';
-    DBPassword = process.env.DBPASSWORD || '';
-    serviceDB = process.env.SERVICEDB || 'roows';
-    hostName = process.env.HOSTNAME || 'localhost';
-    httpPort = parseInt(process.env.HTTPPORT || '5000');
-    wsPort = parseInt(process.env.WSPORT || '4999');
+
+
+class EventPublisher implements IEventPublisher{
+    private store:IConnectionsStore;
+    private room:IRoom;
+
+    constructor (store:IConnectionsStore,room:IRoom){
+        this.store = store;
+        this.room = room;
+    }
+
+    public async publishEvent(event:event):Promise<any>{
+        // TO-DO : accept hooks in this function then call them during execution.
+        const store = this.store;
+        const eventString = JSON.stringify(event);
+        const listeners = await this.room.getListeners();
+        listeners.forEach(listener=>{
+            const sockets = store.getSockets(listener.user);
+            if(sockets){
+                sockets.forEach(socket=>{
+                    socket.send(eventString);
+                });
+            }
+        })
+    }
 }
 
 
 
-function extractIdAndToken(request:IncomingMessage):[number,string]{
-    let id:number;
-    let token:string;
-    const url = request.url || '/';
-    const stringId = url.split('/')[1];
-    id = parseInt(stringId);
-    const tokenOrTokens = request.headers['sec-websocket-protocol'] || '';
-    if(Array.isArray(tokenOrTokens)){
-        token = tokenOrTokens[0];
-    }else{
-        token = tokenOrTokens;
+class EventStore implements IEventStore{
+    private queue:Queue;
+
+    constructor(queue:Queue){
+        this.queue = queue;
     }
-    return [id,token];
+
+    public async storeEvent(event:unpositionedEvent):Promise<{id:number,position:number}>{
+        await this.queue.incrementPosition;
+        const position = await this.queue.getLastPosition();
+        const id = await this.queue.insertEvent({...event,position});
+        return {id,position};
+    }
 }
 
 
@@ -365,6 +421,35 @@ class Authenticator{
 
 
 
+function importConstants():void{
+    DBHost = process.env.DBHOST || 'localhost';
+    DBUser = process.env.DBUSER || 'root';
+    DBPassword = process.env.DBPASSWORD || '';
+    serviceDB = process.env.SERVICEDB || 'roows';
+    hostName = process.env.HOSTNAME || 'localhost';
+    httpPort = parseInt(process.env.HTTPPORT || '5000');
+    wsPort = parseInt(process.env.WSPORT || '4999');
+}
+
+
+
+function extractIdAndToken(request:IncomingMessage):[number,string]{
+    let id:number;
+    let token:string;
+    const url = request.url || '/';
+    const stringId = url.split('/')[1];
+    id = parseInt(stringId);
+    const tokenOrTokens = request.headers['sec-websocket-protocol'] || '';
+    if(Array.isArray(tokenOrTokens)){
+        token = tokenOrTokens[0];
+    }else{
+        token = tokenOrTokens;
+    }
+    return [id,token];
+}
+
+
+
 async function handleConnction(socket:ws,request:IncomingMessage){
     const [collectionId,token] = extractIdAndToken(request);
     const collection = new Collection(collectionId);
@@ -412,7 +497,8 @@ function main():void{
 
 
 function runGarbageCollectors():void{
-
+    // TO-DO : delete expired events
+    // TO-DO : close expired sockets
 }
 
 
