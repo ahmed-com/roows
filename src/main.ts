@@ -55,6 +55,10 @@ interface IEventStore{
     storeEvent : (event:unpositionedEvent)=>Promise<{id:number,position:number}>
 }
 
+interface IAccessStore{
+    insertAccess : (eventId:number,user:string)=>Promise<any>
+}
+
 type unpositionedEvent = {
     data : JSON;
     publishedAt : Date;
@@ -124,7 +128,7 @@ function setupDBConnectionPool(mysql:{createPool:(config:object)=>DBPool}):DBPoo
 
 
 
-class Collection implements IConnectionsStore {
+class Collection implements IConnectionsStore , IAccessStore{
     public id:number;
     private connections:connections;
     private static pool: DBPool;
@@ -317,21 +321,25 @@ class Queue implements IRoom{
 
 
 class EventPublisher implements IEventPublisher{
-    private store:IConnectionsStore;
+    private connectionStore:IConnectionsStore;
+    private accessStore:IAccessStore;
     private room:IRoom;
 
-    constructor (store:IConnectionsStore,room:IRoom){
-        this.store = store;
+    constructor (connectionStore:IConnectionsStore,room:IRoom,accessStore:IAccessStore){
+        this.accessStore = accessStore;
+        this.connectionStore = connectionStore;
         this.room = room;
     }
 
     public async publishEvent(event:event):Promise<any>{
         // TO-DO : accept hooks in this function then call them during execution.
-        const store = this.store;
+        const connectionStore = this.connectionStore;
+        const accessStore = this.accessStore;
         const eventString = JSON.stringify(event);
         const listeners = await this.room.getListeners();
         listeners.forEach(listener=>{
-            const sockets = store.getSockets(listener.user);
+            accessStore.insertAccess(event.id,listener.user);
+            const sockets = connectionStore.getSockets(listener.user);
             if(sockets){
                 sockets.forEach(socket=>{
                     socket.send(eventString);
